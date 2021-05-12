@@ -1,53 +1,35 @@
-from defcon.objects.point import Point
-from defcon.objects.glyph import Glyph
-from defcon.objects.base import BaseObject
-from defcon import Font
-from ufo2ft import compileVariableTTF, compileOTF
-from fontTools.designspaceLib import (
-    DesignSpaceDocument,
-    SourceDescriptor,
-    AxisDescriptor
-)
-from datetime import datetime
-from copy import deepcopy, copy
+import sys
 
+from fontTools import varLib
+from fontTools.ttLib import TTFont
+from fontTools.ttLib.tables._g_l_y_f import Glyph as FTGlyph
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.designspaceLib import DesignSpaceDocument, AxisDescriptor, SourceDescriptor
+from defcon.objects.point import Point
+from defcon.objects.font import Font
+
+sys.path.append("..")
+from server.tools.otf2ttf import otf_to_ttf
+from defcon.objects.glyph import Glyph
+from server.tools.curveTools import curveConverter
+from copy import deepcopy
+from pathlib import Path
+from fontPens.flattenPen import flattenGlyph
 
 @property
 def position(self):
     return self.x, self.y
 
-
 setattr(Point, "position", position)
 setattr(Point, "type", Point.segmentType)
 
-
-def font__deepcopy__(self, settings):
-    clean = self.__class__()
-    clean._layers.defaultLayer = deepcopy(self._layers.defaultLayer)
-    clean.kerning.update(self.kerning)
-    clean.info.deserialize(self.info.serialize())
-    clean.features.text = self.features.text
-    return clean
-
-Font.__deepcopy__ = font__deepcopy__
-
-def process_glyph(glyph, draw_sides, absolute=False, width=160):
+def process_glyph(glyph, draw_sides, absolute=False, depth=160, go=[]):
     drawings = []
     first_clockwise = glyph[0].clockwise
     for contour in glyph:
-        lowest_point = min(
-            zip(contour.segments, range(len(contour.segments))),
-            key=lambda x: x[0][-1].position[::-1],
-        )[1]
-
-        contour_reordered = (
-            contour.segments[lowest_point:] + contour.segments[:lowest_point]
-        )
-        values = [
-            a[-1].y > b[-1].y
-            for a, b in zip(
-                contour_reordered, contour_reordered[1:] + contour_reordered[:1]
-            )
+        lowest_point = min(zip(contour.segments, range(len(contour.segments))),key=lambda x: x[0][-1].position[::-1],)[1]
+        contour_reordered = (contour.segments[lowest_point:] + contour.segments[:lowest_point])
+        values = [a[-1].y > b[-1].y for a, b in zip(contour_reordered, contour_reordered[1:] + contour_reordered[:1])
         ]
         if values[0] == values[-1]:
             index = values[::-1].index(not values[0])
@@ -55,7 +37,7 @@ def process_glyph(glyph, draw_sides, absolute=False, width=160):
             values = values[-index:] + values[:-index]
         last_value = values[0]
         drawing = contour.__class__()
-        edges = [glyph.width / 2 + width / 2, glyph.width / 2 - width / 2]
+        edges = [glyph.width / 2 + depth / 2, glyph.width / 2 - depth / 2]
         if absolute:
             edges = edges[:1] * 2
         if contour.clockwise:
@@ -85,49 +67,72 @@ def process_glyph(glyph, draw_sides, absolute=False, width=160):
                 for point in segment:
                     point.x = edges[(edges.index(point.x) + 1) % 2]
         drawings.append(drawing)
-    return drawings
+    output_glyph = Glyph()
+    for contour in drawings:
+        output_glyph.appendContour(contour)
+    return output_glyph
+
+def draw(master, glyph_name, defcon_glyph, go=[]):
+    pen = TTGlyphPen(go)
+    defcon_glyph.draw(pen)
+    master["glyf"][glyph_name] = pen.glyph()
+    master["hmtx"][glyph_name] = (master["hmtx"][glyph_name][0], defcon_glyph.bounds[0])
+
+def flip(master, glyph_name, defcon_glyph, go=[]):
+    width_half = master["hmtx"][glyph_name][0] / 2
+
+    for contour in defcon_glyph:
+        for point in contour:
+            point.x = width_half + (width_half - point.x)
+    draw(master, glyph_name, defcon_glyph, go=go)
+
+def align(master, glyph_name, defcon_glyph, go=[]):
+    for contour in defcon_glyph:
+        for point in contour:
+            point.x = 0
+    draw(master, glyph_name, defcon_glyph, go=go)
+
+font = Font()
+
+def process_fonts(glyph_names, masters={}, depth=160, tt_font_cubic=None):
+    for glyph_name in glyph_names:
+        glyph = Glyph()
+        pen = glyph.getPen()
+        masters["master_0"]["glyf"][glyph_name].draw(pen, masters["master_0"]["glyf"])
+        glyph.width = masters["master_0"]["hmtx"][glyph_name][0]
+
+        if masters["master_0"]["glyf"][glyph_name].numberOfContours > 0:
+            corrected_glyph = deepcopy(glyph)
+            curveConverter.quadratic2bezier(corrected_glyph)
+            corrected_glyph.correctContourDirection(segmentLength=10)
+            directions = [a.clockwise == b.clockwise for a,b in zip(glyph, corrected_glyph)]
+            if not all(directions):
+                for index, change in enumerate(directions): 
+                    if not change:
+                        glyph[index].reverse()
+
+            processed_glyph = process_glyph(glyph, False, go=glyph_names, depth=depth)
+            processed_glyph_side = process_glyph(glyph, True, depth=depth)
+
+            draw(masters["master_0"], glyph_name, processed_glyph, go=glyph_names)
+            draw(masters["master_90"], glyph_name, processed_glyph_side, go=glyph_names)
+            flip(masters["master_90_flipped"], glyph_name, processed_glyph_side, go=glyph_names)
+            align(masters["master_90_flipped_left"], glyph_name, processed_glyph_side, go=glyph_names)
+            flip(masters["master_0_flipped"], glyph_name, processed_glyph, go=glyph_names)
+            align(masters["master_90_flipped_right"], glyph_name, processed_glyph_side, go=glyph_names)
+
+            for master_name in ("master_90", "master_90_flipped", "master_90_flipped_left"):
+                master = masters[master_name]
+                width, lsb = master["hmtx"][glyph_name]
+                master["hmtx"][glyph_name] = (width, width/2-depth/2)
+            
+            for master_name in ("master_90_flipped_right",):
+                master = masters[master_name]
+                width, lsb = master["hmtx"][glyph_name]
+                master["hmtx"][glyph_name] = (width, width/2+depth/2)
 
 
-def process_font(ufo, draw_sides, absolute=False, width=160):
-    font = deepcopy(ufo)
-    for glyph in font:
-        if len(glyph):
-            drawing = [
-                i
-                for i in process_glyph(
-                    glyph, draw_sides, absolute=absolute, width=width
-                )
-            ]
-            for contour in [contour for contour in glyph]:
-                glyph.removeContour(contour)
-            for contour in drawing:
-                glyph.appendContour(contour)
-            glyph.width = glyph.width
-            glyph.unicode = glyph.unicode
-    return font
-
-
-def flip(ufo):
-    ufo = deepcopy(ufo)
-    for glyph in ufo:
-        width_half = glyph.width / 2
-        for contour in glyph:
-            for point in contour:
-                point.x = width_half + (width_half - point.x)
-    return ufo
-
-
-def align(font, value):
-    font = deepcopy(font)
-    for glyph in font:
-        width_half = glyph.width / 2
-        for contour in glyph:
-            for point in contour:
-                point.x = width_half + value
-    return font
-
-
-def make_designspace():
+def make_designspace(fonts):
     axes = {"rotation": [0, 90, 90.0001, 180, 270, 270.0001, 360]}
     doc = DesignSpaceDocument()
     axis = AxisDescriptor()
@@ -137,7 +142,7 @@ def make_designspace():
     axis.name = "rotation"
     axis.tag = "RTTX"
     doc.addAxis(axis)
-    for i, font in enumerate([None] * len(axes["rotation"])):
+    for i, font in enumerate(fonts):
         source = SourceDescriptor()
         source.font = font
         if i == 0:
@@ -148,66 +153,64 @@ def make_designspace():
         doc.addSource(source)
     return doc
 
+def rotorize(tt_font=None, depth=360, **kwargs):
+    if not isinstance(depth, int):
+        depth = int(float(depth))
 
-designspace_template = make_designspace()
+        
+    master_0 = tt_font
+    glyph_names = master_0.getGlyphOrder()
+    
+    remove_tables = ("TSI0", "TSI1", "TSI2", "TSI3", "TSI4", "TSI5", "gvar", "stat", "fvar", "hvar")
+    tables = master_0.keys()
+    for table_name in remove_tables:
+        if table_name in tables:
+            del master_0[table_name]
 
+    tt_font_cubic = None
+    if "glyf" not in tt_font:
+        tt_font_cubic = deepcopy(tt_font)
+        otf_to_ttf(tt_font)
 
-def designspace(fonts):
-    designspace_copy = deepcopy(designspace_template)
-    for source, font in zip(designspace_copy.sources, fonts):
-        source.font = font
-    return designspace_copy
+    tt_font.save("converted.ttf")
 
+    masters = dict(
+        master_0=master_0,
+        master_90=deepcopy(master_0),
+        master_90_flipped=deepcopy(master_0),
+        master_0_flipped=deepcopy(master_0),
+        master_90_flipped_left=deepcopy(master_0),
+        master_90_flipped_right=deepcopy(master_0)
+        )
+    process_fonts(glyph_names, masters, depth=depth, tt_font_cubic=tt_font_cubic)
+    designspace_underlay = make_designspace((
+        masters["master_0"],
+        masters["master_90"],
+        masters["master_90_flipped"],
+        masters["master_0_flipped"],
+        masters["master_90_flipped"],
+        masters["master_90"],
+        masters["master_0"],
+        ))
+    designspace_overlay = make_designspace((
+        masters["master_0"],
+        masters["master_90_flipped_right"],
+        masters["master_90_flipped_left"],
+        masters["master_0_flipped"],
+        masters["master_90_flipped_right"],
+        masters["master_90_flipped_left"],
+        masters["master_0"],
+        ))
+    return (varLib.build(designspace_underlay, optimize=False)[0], varLib.build(designspace_overlay, optimize=False)[0])
 
-def rotorize(ufo=None, width=80, **kwargs):
-    designspaces = []
-    if isinstance(width, str):
-        width = round(float(width))
-    master_0 = process_font(ufo, False, False, width)
-    master_90 = process_font(ufo, True, False, width)
-    master_90_flipped = flip(master_90)
-    master_0_flipped = flip(master_0)
-    master_90_flipped_left = align(master_90_flipped, -width / 2)
-    master_90_flipped_right = align(master_90_flipped, width / 2)
-
-    for i in range(2):
-        if i == 0:
-            fonts = (
-                master_0,
-                master_90,
-                master_90_flipped,
-                master_0_flipped,
-                master_90_flipped,
-                master_90,
-                master_0,
-            )
-        elif i == 1:
-            fonts = (
-                master_0,
-                master_90_flipped_right,
-                master_90_flipped_left,
-                master_0_flipped,
-                master_90_flipped_right,
-                master_90_flipped_left,
-                master_0,
-            )
-        designspaces.append(designspace(fonts))
-    return designspaces
 
 if __name__ == "__main__":
-    font = Font("gabion.ufo")
-    process_font(font, True)
-
-    # for glyph in ufo:
-    #     if len(glyph):
-    #         contours_a = [deepcopy(contour) for contour in glyph]
-    #         glyph.correctContourDirection(segmentLength=10)
-    #         contours_b = [contour for contour in glyph]
-    #         equals = set(a.clockwise == b.clockwise  for a,b in zip(contours_a, contours_b))
-    #         if len(equals) == 2:
-    #             largest_contour = max(glyph, key=lambda x:x.area)
-    #             index = contours_b.index(largest_contour)
-    #             operand = ("__eq__", "__ne__")[contours_a[index].clockwise == contours_b[index].clockwise]
-    #             for contour_a, contour_b in zip(contours_a, contours_b):
-    #                 if getattr(contour_a.clockwise, operand)(contour_b.clockwise):
-    #                     contour_b.reverse()
+    from fontTools.subset import Subsetter
+    # font = TTFont("../server/test_fonts/ADOBE.ttf")
+    font = TTFont("../server/test_fonts/OTF.otf")
+    subsetter = Subsetter()
+    subsetter.populate(glyphs=["dotlessj", "j", "dotaccent"])
+    subsetter.subset(font)
+    fonts = rotorize(font, depth=360)
+    fonts[1].save("output_over.ttf")
+    font.save("debug.ufo")
