@@ -157,7 +157,6 @@ def rotorize(tt_font=None, depth=360, **kwargs):
     if not isinstance(depth, int):
         depth = int(float(depth))
 
-        
     master_0 = tt_font
     glyph_names = master_0.getGlyphOrder()
     
@@ -171,9 +170,7 @@ def rotorize(tt_font=None, depth=360, **kwargs):
     if "glyf" not in tt_font:
         tt_font_cubic = deepcopy(tt_font)
         otf_to_ttf(tt_font)
-
-    tt_font.save("converted.ttf")
-
+        
     masters = dict(
         master_0=master_0,
         master_90=deepcopy(master_0),
