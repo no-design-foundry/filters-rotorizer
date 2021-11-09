@@ -9,9 +9,9 @@ from defcon.objects.point import Point
 from defcon.objects.font import Font
 
 sys.path.append("..")
-from server.tools.otf2ttf import otf_to_ttf
+from tools.otf2ttf import otf_to_ttf
 from defcon.objects.glyph import Glyph
-from server.tools.curveTools import curveConverter
+from tools.curveTools import curveConverter
 from copy import deepcopy
 from pathlib import Path
 from fontPens.flattenPen import flattenGlyph
