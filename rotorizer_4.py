@@ -1,29 +1,29 @@
-import sys
-
 from fontTools import varLib
 from fontTools.ttLib import TTFont
-from fontTools.ttLib.tables._g_l_y_f import Glyph as FTGlyph
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.designspaceLib import DesignSpaceDocument, AxisDescriptor, SourceDescriptor
-from defcon.objects.point import Point
-from defcon.objects.font import Font
+from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
+from fontTools.pens.cu2quPen import Cu2QuPen
+from fontTools.pens.pointPen import PointToSegmentPen
 
-sys.path.append("..")
-# from tools.otf2ttf import otf_to_ttf
-from defcon.objects.glyph import Glyph
+from defcon import Glyph, Point
+
+from datetime import datetime
+from pathlib import Path
 from tools.curveTools import curveConverter
 from copy import deepcopy
 from pathlib import Path
-from fontPens.flattenPen import flattenGlyph
+
+base = Path(__file__).parent
+
 
 @property
 def position(self):
     return self.x, self.y
 
 setattr(Point, "position", position)
-setattr(Point, "type", Point.segmentType)
 
-def process_glyph(glyph, draw_sides, absolute=False, depth=160, go=[]):
+def process_glyph(glyph, draw_sides, absolute=False, depth=160):
     drawings = []
     first_clockwise = glyph[0].clockwise
     for contour in glyph:
@@ -55,7 +55,7 @@ def process_glyph(glyph, draw_sides, absolute=False, depth=160, go=[]):
                 x, y = point.position
                 if draw_sides:
                     x = edges[0]
-                drawing.appendPoint(Point((x, y), point.type))
+                drawing.appendPoint(Point((x, y), point.segmentType))
             if duplicate is True:
                 x, y = segment[-1].position
                 if draw_sides:
@@ -68,9 +68,28 @@ def process_glyph(glyph, draw_sides, absolute=False, depth=160, go=[]):
                     point.x = edges[(edges.index(point.x) + 1) % 2]
         drawings.append(drawing)
     output_glyph = Glyph()
+    output_glyph.unicode = glyph.unicode
+    output_glyph.name = glyph.name
+    output_glyph.width = glyph.width
     for contour in drawings:
         output_glyph.appendContour(contour)
     return output_glyph
+
+class TranslatingPen():
+    def __init__(self, other_pen):
+        self.other_pen = other_pen
+
+    def moveTo(self, point):
+        self.other_pen.moveTo(point)
+
+    def lineTo(self, point):
+        self.other_pen.lineTo(point)
+
+    def closePath(self):
+        self.other_pen.closePath()
+
+    def qCurveTo(self, *points):
+        self.other_pen.qCurveTo(*points)
 
 def draw(master, glyph_name, defcon_glyph, go=[]):
     pen = TTGlyphPen(go)
@@ -92,16 +111,15 @@ def align(master, glyph_name, defcon_glyph, go=[]):
             point.x = 0
     draw(master, glyph_name, defcon_glyph, go=go)
 
-font = Font()
-
-def process_fonts(glyph_names, masters={}, depth=160, tt_font_cubic=None):
+def process_fonts(glyph_names, masters={}, depth=160):
     for glyph_name in glyph_names:
         glyph = Glyph()
         pen = glyph.getPen()
+
         masters["master_0"]["glyf"][glyph_name].draw(pen, masters["master_0"]["glyf"])
         glyph.width = masters["master_0"]["hmtx"][glyph_name][0]
 
-        if masters["master_0"]["glyf"][glyph_name].numberOfContours > 0:
+        if len(glyph) > 0:
             corrected_glyph = deepcopy(glyph)
             curveConverter.quadratic2bezier(corrected_glyph)
             corrected_glyph.correctContourDirection(segmentLength=10)
@@ -111,8 +129,8 @@ def process_fonts(glyph_names, masters={}, depth=160, tt_font_cubic=None):
                     if not change:
                         glyph[index].reverse()
 
-            processed_glyph = process_glyph(glyph, False, go=glyph_names, depth=depth)
-            processed_glyph_side = process_glyph(glyph, True, depth=depth)
+            processed_glyph = process_glyph(deepcopy(glyph), False, depth=depth)
+            processed_glyph_side = process_glyph(deepcopy(glyph), True, depth=depth)
 
             draw(masters["master_0"], glyph_name, processed_glyph, go=glyph_names)
             draw(masters["master_90"], glyph_name, processed_glyph_side, go=glyph_names)
@@ -153,23 +171,81 @@ def make_designspace(fonts):
         doc.addSource(source)
     return doc
 
-def rotorize(tt_font=None, depth=360, **kwargs):
+
+def createCmap(preview_string_glyph_names, preview_string_unicodes):
+    outtables = []
+    subtable = CmapSubtable.newSubtable(4)
+    subtable.platformID = 0
+    subtable.platEncID = 3
+    subtable.language = 0
+    subtable.cmap = {k:v for v,k in zip(preview_string_glyph_names, preview_string_unicodes)}
+    outtables.append(subtable)
+    return outtables
+
+def extractGlyf(source, glyph_name):
+    return source["glyf"][glyph_name]
+
+def extractCff(source, glyph_name, glyph_order):
+    cff = source["CFF "]
+    content = cff.cff[cff.cff.keys()[0]]
+    glyph = content.CharStrings[glyph_name]
+    output_pen = TTGlyphPen([])
+    cu2quPen = Cu2QuPen(other_pen=output_pen, max_err=2)
+    glyph.draw(cu2quPen)
+    try:
+        cu2quPen.endPath()
+    except:
+        pass
+    return output_pen.glyph()
+
+def extractCff2(source, glyph_name, glyph_order):
+    cff2 = source["CFF2"]
+    content = cff2.cff[cff2.cff.keys()[0]]
+    glyph = content.CharStrings[glyph_name]
+    # output_glyph = Glyph()
+    # output_pen = output_glyph.getPen()
+    output_pen = TTGlyphPen([])
+    cu2quPen = Cu2QuPen(other_pen=output_pen, max_err=2)
+    glyph.draw(cu2quPen)
+    cu2quPen.endPath()
+    # return output_glyph
+
+    return output_pen.glyph()
+
+def rotorize(tt_font=None, depth=360, glyph_names_to_process=[], unicodes=[], cmap={}):
     if not isinstance(depth, int):
         depth = int(float(depth))
-
-    master_0 = tt_font
-    glyph_names = master_0.getGlyphOrder()
     
-    remove_tables = ("TSI0", "TSI1", "TSI2", "TSI3", "TSI4", "TSI5", "gvar", "stat", "fvar", "hvar")
-    tables = master_0.keys()
-    for table_name in remove_tables:
-        if table_name in tables:
-            del master_0[table_name]
+    source = tt_font
+    output = TTFont(base/"template.ttf")
 
-    tt_font_cubic = None
-    if "glyf" not in tt_font:
-        tt_font_cubic = deepcopy(tt_font)
-        otf_to_ttf(tt_font)
+    is_ttf = False
+    is_cff = False
+    is_cff2 = False
+    if "glyf" in source:
+        is_ttf = True
+    elif "CFF " in source:
+        is_cff = True
+    elif "CFF2" in source:
+        is_cff2 = True
+
+    for unicode_ in unicodes:
+        glyph_name = cmap[unicode_]
+        if is_ttf:
+            glyph = extractGlyf(source, glyph_name)
+        elif is_cff2:
+            glyph = extractCff2(source, glyph_name, glyph_order)
+        elif is_cff:
+            glyph = extractCff(source, glyph_name, glyph_order)
+        output["glyf"][glyph_name] = glyph
+        output["hmtx"][glyph_name] = source["hmtx"][glyph_name]
+
+    output["cmap"].tables = createCmap(glyph_names_to_process, unicodes)
+    output["name"] = source["name"]
+    output["hhea"] = source["hhea"]
+    output["head"] = source["head"]
+
+    master_0 = output
         
     masters = dict(
         master_0=master_0,
@@ -179,7 +255,7 @@ def rotorize(tt_font=None, depth=360, **kwargs):
         master_90_flipped_left=deepcopy(master_0),
         master_90_flipped_right=deepcopy(master_0)
         )
-    process_fonts(glyph_names, masters, depth=depth, tt_font_cubic=tt_font_cubic)
+    process_fonts(glyph_names_to_process, masters, depth=depth)
     designspace_underlay = make_designspace((
         masters["master_0"],
         masters["master_90"],
@@ -198,21 +274,21 @@ def rotorize(tt_font=None, depth=360, **kwargs):
         masters["master_90_flipped_left"],
         masters["master_0"],
         ))
+
     return (varLib.build(designspace_underlay, optimize=False)[0], varLib.build(designspace_overlay, optimize=False)[0])
 
-
 if __name__ == "__main__":
-    from fontTools.subset import Subsetter
-    # font = TTFont("../server/test_fonts/ADOBE.ttf")
-    # font = TTFont("../server/test_fonts/OTF.otf")
-    from datetime import datetime
+
     start = datetime.now()
-    font = TTFont("fe/public/verdana.ttf")
-    subsetter = Subsetter()
-    subsetter.populate(glyphs=["A", "B", "C", "D", "E", "F", "G", "H"])
-    subsetter.subset(font)
-    fonts = rotorize(font, depth=360)
+
+    # source = TTFont("test_fonts/sourceSerif.otf")
+    # source = TTFont("test_fonts/gabion.otf")
+    source = TTFont("test_fonts/VTT.ttf")
+
+    preview_string = "rotor"    
+    fonts = rotorize(source, depth=360)
+
+    for i, font in enumerate(fonts):
+        font.save(f"output-{i}.ttf")
     end = datetime.now()
     print((end-start).total_seconds())
-    # fonts[1].save("output_over.ttf")
-    # font.save("debug.ufo")

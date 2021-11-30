@@ -1,0 +1,73 @@
+from defcon import Glyph
+from fontTools.ttLib.tables._g_l_y_f import Glyph as FTGlyph
+from fontTools.ttLib.ttFont import TTFont
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.pens.t2CharStringPen import T2CharStringPen
+from fontTools.pens.cu2quPen import Cu2QuPen
+
+
+
+def extractCff(source, glyph_name, glyph_order):
+    cff = source["CFF "]
+    content = cff.cff[cff.cff.keys()[0]]
+    glyph = content.CharStrings[glyph_name]
+    cff_pen = T2CharStringPen(None, glyph_order, CFF2=False)
+    print(cff_pen)
+
+def extractCff2(source, glyph_name, glyph_order):
+    cff2 = source["CFF2"]
+    content = cff2.cff[cff2.cff.keys()[0]]
+    glyph = content.CharStrings[glyph_name]
+    output_pen = TTGlyphPen([])
+    cu2quPen = Cu2QuPen(other_pen=output_pen, max_err=2)
+    glyph.draw(cu2quPen)
+    cu2quPen.endPath()
+    return output_pen.glyph()
+
+def extractGlyf(source, glyph_name):
+    return source["glyf"][glyph_name]
+
+def extractHmtx(source, glyph_name):
+    return source["hmtx"][glyph_name]
+
+def extractUnicode():
+    return reversed_mapping.get(glyph_name, [])
+
+source = TTFont("fe/public/verdana.ttf")
+# source = TTFont("fe/public/sourceSerif.otf")
+from datetime import datetime
+
+preview_string = "ABCDEF"
+preview_string_unicodes = [ord(char) for char in preview_string]
+
+
+cmap = {k:v for k,v in source.getBestCmap().items() if k in preview_string_unicodes}
+reversed_mapping = {v:(k,) for k,v in cmap.items()}
+glyph_order = reversed_mapping.keys()
+
+start = datetime.now()
+
+is_ttf = False
+is_cff = False
+is_cff2 = False
+if "glyf" in source:
+    is_ttf = True
+elif "CFF " in source:
+    is_cff = True
+elif "CFF2" in source:
+    is_cff2 = True
+
+
+for glyph_name in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+    if is_ttf:
+        task = extractGlyf(source, glyph_name)
+    elif is_cff2:
+        task = extractCff2(source, glyph_name, glyph_order)
+    elif is_cff:
+        task = glyph = extractCff(source, glyph_name, glyph_order)
+
+
+
+end = datetime.now()
+
+print((end - start).total_seconds())
