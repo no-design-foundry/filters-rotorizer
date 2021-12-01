@@ -172,13 +172,13 @@ def make_designspace(fonts):
     return doc
 
 
-def createCmap(preview_string_glyph_names, preview_string_unicodes):
+def createCmap(preview_string_glyph_names, cmap_reversed):
     outtables = []
     subtable = CmapSubtable.newSubtable(4)
     subtable.platformID = 0
     subtable.platEncID = 3
     subtable.language = 0
-    subtable.cmap = {k:v for v,k in zip(preview_string_glyph_names, preview_string_unicodes)}
+    subtable.cmap = {cmap_reversed[glyph_name]:glyph_name for glyph_name in preview_string_glyph_names}
     outtables.append(subtable)
     return outtables
 
@@ -212,7 +212,7 @@ def extractCff2(source, glyph_name, glyph_order):
 
     return output_pen.glyph()
 
-def rotorize(tt_font=None, depth=360, glyph_names_to_process=[], unicodes=[], cmap={}):
+def rotorize(tt_font=None, depth=360, glyph_names_to_process=[], cmap_reversed={}):
     if not isinstance(depth, int):
         depth = int(float(depth))
     
@@ -229,8 +229,7 @@ def rotorize(tt_font=None, depth=360, glyph_names_to_process=[], unicodes=[], cm
     elif "CFF2" in source:
         is_cff2 = True
 
-    for unicode_ in unicodes:
-        glyph_name = cmap[unicode_]
+    for glyph_name in glyph_names_to_process:
         if is_ttf:
             glyph = extractGlyf(source, glyph_name)
         elif is_cff2:
@@ -240,7 +239,7 @@ def rotorize(tt_font=None, depth=360, glyph_names_to_process=[], unicodes=[], cm
         output["glyf"][glyph_name] = glyph
         output["hmtx"][glyph_name] = source["hmtx"][glyph_name]
 
-    output["cmap"].tables = createCmap(glyph_names_to_process, unicodes)
+    output["cmap"].tables = createCmap(glyph_names_to_process, cmap_reversed)
     output["name"] = source["name"]
     output["hhea"] = source["hhea"]
     output["head"] = source["head"]
