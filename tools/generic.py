@@ -1,8 +1,8 @@
 import base64
+import defcon
 from io import BytesIO
 from itertools import chain
 from fontTools.ttLib import TTFont
-import defcon
 from ufo2ft import compileTTF
 from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.cffLib import PrivateDict
