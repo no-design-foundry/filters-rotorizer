@@ -16,7 +16,6 @@ from pathlib import Path
 
 base = Path(__file__).parent
 
-
 @property
 def position(self):
     return self.x, self.y

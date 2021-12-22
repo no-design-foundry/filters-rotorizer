@@ -1,4 +1,5 @@
 .DS_Store
 *.ttf
+!template.ttf
 *.otf
 __pycache__
