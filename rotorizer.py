@@ -13,6 +13,7 @@ from pathlib import Path
 from tools.curveTools import curveConverter
 from copy import deepcopy
 from pathlib import Path
+from ufo2ft import compileVariableTTF
 
 base = Path(__file__).parent
 
@@ -91,14 +92,20 @@ class TranslatingPen():
         self.other_pen.qCurveTo(*points)
 
 def draw(master, glyph_name, defcon_glyph, go=[]):
-    pen = TTGlyphPen(go)
-    defcon_glyph.draw(pen)
-    master["glyf"][glyph_name] = pen.glyph()
-    master["hmtx"][glyph_name] = (master["hmtx"][glyph_name][0], defcon_glyph.bounds[0])
+    if isinstance(master, TTFont):
+        pen = TTGlyphPen(go)
+        defcon_glyph.draw(pen)
+        master["glyf"][glyph_name] = pen.glyph()
+        master["hmtx"][glyph_name] = (master["hmtx"][glyph_name][0], defcon_glyph.bounds[0])
+    else:
+        master[glyph_name].clear()
+        defcon_glyph.draw(master[glyph_name].getPen())
 
 def flip(master, glyph_name, defcon_glyph, go=[]):
-    width_half = master["hmtx"][glyph_name][0] / 2
-
+    if isinstance(master, TTFont):
+        width_half = master["hmtx"][glyph_name][0] / 2
+    else:
+        width_half = master[glyph_name].width / 2
     for contour in defcon_glyph:
         for point in contour:
             point.x = width_half + (width_half - point.x)
@@ -114,9 +121,11 @@ def process_fonts(glyph_names, masters={}, depth=160):
     for glyph_name in glyph_names:
         glyph = Glyph()
         pen = glyph.getPen()
-
-        masters["master_0"]["glyf"][glyph_name].draw(pen, masters["master_0"]["glyf"])
-        glyph.width = masters["master_0"]["hmtx"][glyph_name][0]
+        if isinstance(masters["master_0"], TTFont):
+            masters["master_0"]["glyf"][glyph_name].draw(pen, masters["master_0"]["glyf"])
+            glyph.width = masters["master_0"]["hmtx"][glyph_name][0]
+        else:
+            masters["master_0"][glyph_name].draw(pen)
 
         if len(glyph) > 0:
             corrected_glyph = deepcopy(glyph)
@@ -140,13 +149,23 @@ def process_fonts(glyph_names, masters={}, depth=160):
 
             for master_name in ("master_90", "master_90_flipped", "master_90_flipped_left"):
                 master = masters[master_name]
-                width, lsb = master["hmtx"][glyph_name]
-                master["hmtx"][glyph_name] = (width, width/2-depth/2)
+                if isinstance(master, TTFont):
+                    width, lsb = master["hmtx"][glyph_name]
+                    master["hmtx"][glyph_name] = (width, width/2-depth/2)
+                else:
+                    width = master[glyph_name].width
+                    master[glyph_name].leftMargin = width/2-depth/2
+                    master[glyph_name].width = width
             
             for master_name in ("master_90_flipped_right",):
                 master = masters[master_name]
-                width, lsb = master["hmtx"][glyph_name]
-                master["hmtx"][glyph_name] = (width, width/2+depth/2)
+                if isinstance(master, TTFont):
+                    width, lsb = master["hmtx"][glyph_name]
+                    master["hmtx"][glyph_name] = (width, width/2+depth/2)
+                else:
+                    width = master[glyph_name].width
+                    master[glyph_name].leftMargin = width/2+depth/2
+                    master[glyph_name].width = width
 
 
 def make_designspace(fonts):
@@ -201,49 +220,48 @@ def extractCff2(source, glyph_name, glyph_order):
     cff2 = source["CFF2"]
     content = cff2.cff[cff2.cff.keys()[0]]
     glyph = content.CharStrings[glyph_name]
-    # output_glyph = Glyph()
-    # output_pen = output_glyph.getPen()
     output_pen = TTGlyphPen([])
     cu2quPen = Cu2QuPen(other_pen=output_pen, max_err=2)
     glyph.draw(cu2quPen)
     cu2quPen.endPath()
-    # return output_glyph
-
     return output_pen.glyph()
 
-def rotorize(tt_font=None, depth=360, glyph_names_to_process=[], cmap_reversed={}):
-    if not isinstance(depth, int):
-        depth = int(float(depth))
-    
-    source = tt_font
-    output = TTFont(base/"template.ttf")
+def rotorize(ufo=None, tt_font=None, depth=360, glyph_names_to_process=[], cmap_reversed={}):
+    processing_ufo = False
+    if tt_font:
+        if not isinstance(depth, int):
+            depth = int(float(depth))
+        
+        source = tt_font
+        output = TTFont(base/"template.ttf")
 
-    is_ttf = False
-    is_cff = False
-    is_cff2 = False
-    if "glyf" in source:
-        is_ttf = True
-    elif "CFF " in source:
-        is_cff = True
-    elif "CFF2" in source:
-        is_cff2 = True
-
-    for glyph_name in glyph_names_to_process:
-        if is_ttf:
-            glyph = extractGlyf(source, glyph_name)
-        elif is_cff2:
-            glyph = extractCff2(source, glyph_name, glyph_order)
-        elif is_cff:
-            glyph = extractCff(source, glyph_name, glyph_order)
-        output["glyf"][glyph_name] = glyph
-        output["hmtx"][glyph_name] = source["hmtx"][glyph_name]
-
-    output["cmap"].tables = createCmap(glyph_names_to_process, cmap_reversed)
-    output["name"] = source["name"]
-    output["hhea"] = source["hhea"]
-    output["head"] = source["head"]
-
-    master_0 = output
+        is_ttf = False
+        is_cff = False
+        is_cff2 = False
+        if "glyf" in source:
+            is_ttf = True
+        elif "CFF " in source:
+            is_cff = True
+        elif "CFF2" in source:
+            is_cff2 = True
+        for glyph_name in glyph_names_to_process:
+            if is_ttf:
+                glyph = extractGlyf(source, glyph_name)
+            elif is_cff2:
+                glyph = extractCff2(source, glyph_name, glyph_order)
+            elif is_cff:
+                glyph = extractCff(source, glyph_name, glyph_order)
+            output["glyf"][glyph_name] = glyph
+            output["hmtx"][glyph_name] = source["hmtx"][glyph_name]
+        output["cmap"].tables = createCmap(glyph_names_to_process, cmap_reversed)
+        output["name"] = source["name"]
+        output["hhea"] = source["hhea"]
+        output["head"] = source["head"]
+        master_0 = output
+    else:
+        glyph_names_to_process=[glyph.name for glyph in ufo]
+        processing_ufo = True
+        master_0 = ufo
         
     masters = dict(
         master_0=master_0,
@@ -272,8 +290,10 @@ def rotorize(tt_font=None, depth=360, glyph_names_to_process=[], cmap_reversed={
         masters["master_90_flipped_left"],
         masters["master_0"],
         ))
-
-    return (varLib.build(designspace_underlay, optimize=False)[0], varLib.build(designspace_overlay, optimize=False)[0])
+    if processing_ufo:
+        return (compileVariableTTF(designspace_underlay), compileVariableTTF(designspace_overlay))
+    else:
+        return (varLib.build(designspace_underlay, optimize=False)[0], varLib.build(designspace_overlay, optimize=False)[0])
 
 if __name__ == "__main__":
 
