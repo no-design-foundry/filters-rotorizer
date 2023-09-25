@@ -234,7 +234,7 @@ def rotorize(ufo=None, tt_font=None, depth=360, glyph_names_to_process=[], cmap_
         
         source = tt_font
         output = TTFont(base/"template.ttf")
-
+        glyph_order = tt_font.getGlyphOrder()
         is_ttf = False
         is_cff = False
         is_cff2 = False
