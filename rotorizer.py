@@ -23,20 +23,15 @@ def position(self):
 
 setattr(Point, "position", position)
 
-def process_glyph(glyph, draw_sides, absolute=False, depth=160):
+def process_glyph(glyph, draw_sides, absolute=False, depth=160, is_cff=None):
     drawings = []
-    first_clockwise = glyph[0].clockwise
     for contour in glyph:
-        print(contour, glyph)
         lowest_point = min(zip(contour.segments, range(len(contour.segments))),key=lambda x: x[0][-1].position[::-1],)[1]
         contour_reordered = (contour.segments[lowest_point:] + contour.segments[:lowest_point])
         values = [a[-1].y > b[-1].y for a, b in zip(contour_reordered, contour_reordered[1:] + contour_reordered[:1])
         ]
         if values[0] == values[-1]:
-            try:
-                index = values[::-1].index(not values[0])
-            except ValueError:
-                index = 0
+            index = values[::-1].index(not values[0])
             contour_reordered = contour_reordered[-index:] + contour_reordered[:-index]
             values = values[-index:] + values[:-index]
         last_value = values[0]
@@ -49,22 +44,20 @@ def process_glyph(glyph, draw_sides, absolute=False, depth=160):
         for index in range(1, len(values) + 1):
             value = values[index % len(values)]
             duplicate = False
-            value_next = values[(index + 1) % len(values)]
             segment = contour_reordered[index % len(values)]
-            segment_next = contour_reordered[(index + 1) % len(values)]
             if value != last_value:
                 duplicate = True
                 last_value = value
             for point in segment:
                 x, y = point.position
                 if draw_sides:
-                    x = edges[0]
+                    x = edges[0 if is_cff else 1]
                 drawing.appendPoint(Point((x, y), point.segmentType))
             if duplicate is True:
                 x, y = segment[-1].position
                 if draw_sides:
                     edges = edges[::-1]
-                    x = edges[0]
+                    x = edges[0 if is_cff else 1]
                 drawing.appendPoint(Point((x, y), "line"))
         if contour.clockwise and draw_sides:
             for segment in drawing.segments:
@@ -121,7 +114,7 @@ def align(master, glyph_name, defcon_glyph, go=[]):
             point.x = 0
     draw(master, glyph_name, defcon_glyph, go=go)
 
-def process_fonts(glyph_names, masters={}, depth=160):
+def process_fonts(glyph_names, masters={}, depth=160, is_cff=None):
     for glyph_name in glyph_names:
         glyph = Glyph()
         pen = glyph.getPen()
@@ -132,21 +125,9 @@ def process_fonts(glyph_names, masters={}, depth=160):
             masters["master_0"][glyph_name].draw(pen)
 
         if len(glyph) > 0:
-            corrected_glyph = deepcopy(glyph)
-            curveConverter.quadratic2bezier(corrected_glyph)
-            try:
-                corrected_glyph.correctContourDirection(segmentLength=10)
-            except TypeError:
-                pass
-            directions = [a.clockwise == b.clockwise for a,b in zip(glyph, corrected_glyph)]
-            if not all(directions):
-                for index, change in enumerate(directions): 
-                    if not change:
-                        glyph[index].reverse()
-
-            processed_glyph = process_glyph(deepcopy(glyph), False, depth=depth)
-            processed_glyph_side = process_glyph(deepcopy(glyph), True, depth=depth)
-
+            print(dir(glyph[0]))
+            processed_glyph = process_glyph(deepcopy(glyph), False, depth=depth, is_cff=is_cff)
+            processed_glyph_side = process_glyph(deepcopy(glyph), True, depth=depth, is_cff=is_cff)
             draw(masters["master_0"], glyph_name, processed_glyph, go=glyph_names)
             draw(masters["master_90"], glyph_name, processed_glyph_side, go=glyph_names)
             flip(masters["master_90_flipped"], glyph_name, processed_glyph_side, go=glyph_names)
@@ -233,12 +214,11 @@ def extractCff2(source, glyph_name, glyph_order):
     cu2quPen.endPath()
     return output_pen.glyph()
 
-def rotorize(ufo=None, tt_font=None, depth=360, glyph_names_to_process=[], cmap_reversed={}):
+def rotorize(ufo=None, tt_font=None, depth=360, glyph_names_to_process=[], cmap_reversed={}, is_cff=None):
     processing_ufo = False
     if tt_font:
         if not isinstance(depth, int):
             depth = int(float(depth))
-        
         source = tt_font
         output = TTFont(base/"template.ttf")
         glyph_order = tt_font.getGlyphOrder()
@@ -278,7 +258,7 @@ def rotorize(ufo=None, tt_font=None, depth=360, glyph_names_to_process=[], cmap_
         master_90_flipped_left=deepcopy(master_0),
         master_90_flipped_right=deepcopy(master_0)
         )
-    process_fonts(glyph_names_to_process, masters, depth=depth)
+    process_fonts(glyph_names_to_process, masters, depth=depth*tt_font["head"].unitsPerEm/1000, is_cff=is_cff)
     designspace_underlay = make_designspace((
         masters["master_0"],
         masters["master_90"],
