@@ -27,12 +27,16 @@ def process_glyph(glyph, draw_sides, absolute=False, depth=160):
     drawings = []
     first_clockwise = glyph[0].clockwise
     for contour in glyph:
+        print(contour, glyph)
         lowest_point = min(zip(contour.segments, range(len(contour.segments))),key=lambda x: x[0][-1].position[::-1],)[1]
         contour_reordered = (contour.segments[lowest_point:] + contour.segments[:lowest_point])
         values = [a[-1].y > b[-1].y for a, b in zip(contour_reordered, contour_reordered[1:] + contour_reordered[:1])
         ]
         if values[0] == values[-1]:
-            index = values[::-1].index(not values[0])
+            try:
+                index = values[::-1].index(not values[0])
+            except ValueError:
+                index = 0
             contour_reordered = contour_reordered[-index:] + contour_reordered[:-index]
             values = values[-index:] + values[:-index]
         last_value = values[0]
@@ -130,7 +134,10 @@ def process_fonts(glyph_names, masters={}, depth=160):
         if len(glyph) > 0:
             corrected_glyph = deepcopy(glyph)
             curveConverter.quadratic2bezier(corrected_glyph)
-            corrected_glyph.correctContourDirection(segmentLength=10)
+            try:
+                corrected_glyph.correctContourDirection(segmentLength=10)
+            except TypeError:
+                pass
             directions = [a.clockwise == b.clockwise for a,b in zip(glyph, corrected_glyph)]
             if not all(directions):
                 for index, change in enumerate(directions): 
