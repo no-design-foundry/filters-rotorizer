@@ -125,7 +125,6 @@ def process_fonts(glyph_names, masters={}, depth=160, is_cff=None):
             masters["master_0"][glyph_name].draw(pen)
 
         if len(glyph) > 0:
-            print(dir(glyph[0]))
             processed_glyph = process_glyph(deepcopy(glyph), False, depth=depth, is_cff=is_cff)
             processed_glyph_side = process_glyph(deepcopy(glyph), True, depth=depth, is_cff=is_cff)
             draw(masters["master_0"], glyph_name, processed_glyph, go=glyph_names)
@@ -184,7 +183,8 @@ def createCmap(preview_string_glyph_names, cmap_reversed):
     subtable.platformID = 0
     subtable.platEncID = 3
     subtable.language = 0
-    subtable.cmap = {cmap_reversed[glyph_name]:glyph_name for glyph_name in preview_string_glyph_names}
+
+    subtable.cmap = {cmap_reversed[glyph_name]:glyph_name for glyph_name in preview_string_glyph_names if cmap_reversed.get(glyph_name)} # if
     outtables.append(subtable)
     return outtables
 
@@ -214,42 +214,41 @@ def extractCff2(source, glyph_name, glyph_order):
     cu2quPen.endPath()
     return output_pen.glyph()
 
-def rotorize(ufo=None, tt_font=None, depth=360, glyph_names_to_process=[], cmap_reversed={}, is_cff=None):
+def rotorize(ufo=None, tt_font=None, depth=360, glyph_names_to_process=None, cmap_reversed=None, is_cff=None):
     processing_ufo = False
-    if tt_font:
-        if not isinstance(depth, int):
-            depth = int(float(depth))
-        source = tt_font
-        output = TTFont(base/"template.ttf")
-        glyph_order = tt_font.getGlyphOrder()
-        is_ttf = False
-        is_cff = False
-        is_cff2 = False
-        if "glyf" in source:
-            is_ttf = True
-        elif "CFF " in source:
-            is_cff = True
-        elif "CFF2" in source:
-            is_cff2 = True
-        for glyph_name in glyph_names_to_process:
-            if is_ttf:
-                glyph = extractGlyf(source, glyph_name)
-            elif is_cff2:
-                glyph = extractCff2(source, glyph_name, glyph_order)
-            elif is_cff:
-                glyph = extractCff(source, glyph_name, glyph_order)
-            output["glyf"][glyph_name] = glyph
-            output["hmtx"][glyph_name] = source["hmtx"][glyph_name]
-        output["cmap"].tables = createCmap(glyph_names_to_process, cmap_reversed)
-        output["name"] = source["name"]
-        output["hhea"] = source["hhea"]
-        output["head"] = source["head"]
-        master_0 = output
-    else:
+    if not glyph_names_to_process:
         glyph_names_to_process=[glyph.name for glyph in ufo]
-        processing_ufo = True
-        master_0 = ufo
-        
+    if not cmap_reversed:
+        cmap_reversed = {v:k for k,v in tt_font.getBestCmap().items()}
+    if not isinstance(depth, int):
+        depth = int(float(depth))
+    source = tt_font
+    output = TTFont(base/"template.ttf")
+    glyph_order = tt_font.getGlyphOrder()
+    is_ttf = False
+    is_cff = False
+    is_cff2 = False
+    if "glyf" in source:
+        is_ttf = True
+    elif "CFF " in source:
+        is_cff = True
+    elif "CFF2" in source:
+        is_cff2 = True
+    for glyph_name in glyph_names_to_process:
+        if is_ttf:
+            glyph = extractGlyf(source, glyph_name)
+        elif is_cff2:
+            glyph = extractCff2(source, glyph_name, glyph_order)
+        elif is_cff:
+            glyph = extractCff(source, glyph_name, glyph_order)
+        output["glyf"][glyph_name] = glyph
+        output["hmtx"][glyph_name] = source["hmtx"][glyph_name]
+    output["cmap"].tables = createCmap(glyph_names_to_process, cmap_reversed)
+    output["name"] = source["name"]
+    output["hhea"] = source["hhea"]
+    output["head"] = source["head"]
+    master_0 = output
+
     masters = dict(
         master_0=master_0,
         master_90=deepcopy(master_0),
