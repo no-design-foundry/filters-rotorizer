@@ -16,6 +16,8 @@ from pathlib import Path
 from ufo2ft import compileVariableTTF
 from multiprocessing.pool import ThreadPool
 import threading
+from queue import Queue
+
 
 base = Path(__file__).parent
 
@@ -263,10 +265,8 @@ def rotorize(ufo=None, tt_font=None, depth=360, glyph_names_to_process=None, cma
         masters["master_0"],
         ), ufo.info.familyName)
     
-    start = datetime.now()
+         
     output = (compileVariableTTF(designspace_underlay, optimizeGvar=False), compileVariableTTF(designspace_overlay, optimizeGvar=False))
-    end = datetime.now()
-    print((end - start).total_seconds())
     # if tr:
     return output
     # else:
