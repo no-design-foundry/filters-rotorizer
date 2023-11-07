@@ -267,9 +267,7 @@ def rotorize(ufo=None, tt_font=None, depth=360, glyph_names_to_process=None, cma
     
          
     output = (compileVariableTTF(designspace_underlay, optimizeGvar=False), compileVariableTTF(designspace_overlay, optimizeGvar=False))
-    # if tr:
     return output
-    # else:
     # return (varLib.build(designspace_underlay, optimize=False)[0], varLib.build(designspace_overlay, optimize=False)[0])
 
 if __name__ == "__main__":
