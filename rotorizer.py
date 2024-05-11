@@ -35,9 +35,13 @@ def process_glyph(glyph, draw_sides, absolute=False, depth=160, is_cff=None):
         values = [a[-1].y > b[-1].y for a, b in zip(contour_reordered, contour_reordered[1:] + contour_reordered[:1])
         ]
         if values[0] == values[-1]:
-            index = values[::-1].index(not values[0])
-            contour_reordered = contour_reordered[-index:] + contour_reordered[:-index]
-            values = values[-index:] + values[:-index]
+            try:
+                index = values[::-1].index(not values[0])
+                contour_reordered = contour_reordered[-index:] + contour_reordered[:-index]
+                values = values[-index:] + values[:-index]
+            except ValueError as e:
+                print(e)
+                contour_reordered = contour_reordered[::-1]
         last_value = values[0]
         drawing = contour.__class__()
         edges = [glyph.width / 2 + depth / 2, glyph.width / 2 - depth / 2]
