@@ -1,25 +1,17 @@
-from fontTools import varLib
 from fontTools.ttLib import TTFont
 from fontTools.pens.ttGlyphPen import TTGlyphPen
-from fontTools.designspaceLib import DesignSpaceDocument, AxisDescriptor, SourceDescriptor, InstanceDescriptor, LocationLabelDescriptor
+from fontTools.designspaceLib import DesignSpaceDocument, AxisDescriptor, SourceDescriptor, InstanceDescriptor
 from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
 from fontTools.pens.cu2quPen import Cu2QuPen
-from fontTools.pens.pointPen import PointToSegmentPen
 
 from defcon import Glyph, Point, Font
 
 from datetime import datetime
 from pathlib import Path
-from tools.curveTools import curveConverter
-from copy import deepcopy
 from pathlib import Path
 from ufo2ft import compileVariableTTF
-from multiprocessing.pool import ThreadPool
-import threading
-from queue import Queue
+from gc import collect
 
-
-base = Path(__file__).parent
 
 @property
 def position(self):
@@ -130,8 +122,14 @@ def process_fonts(glyph_names, masters={}, depth=160, is_cff=None):
             masters["master_0"][glyph_name].draw(pen)
 
         if len(glyph) > 0:
-            processed_glyph = process_glyph(deepcopy(glyph), False, depth=depth, is_cff=is_cff)
-            processed_glyph_side = process_glyph(deepcopy(glyph), True, depth=depth, is_cff=is_cff)
+            processed_glyph_glyph = Glyph()
+            glyph.draw(processed_glyph_glyph.getPen())
+
+            processed_glyph_side = Glyph()
+            glyph.draw(processed_glyph_side.getPen())
+
+            processed_glyph = process_glyph(processed_glyph_glyph, False, depth=depth, is_cff=is_cff)
+            processed_glyph_side = process_glyph(processed_glyph_side, True, depth=depth, is_cff=is_cff)
             draw(masters["master_0"], glyph_name, processed_glyph, go=glyph_names)
             draw(masters["master_90"], glyph_name, processed_glyph_side, go=glyph_names)
             flip(masters["master_90_flipped"], glyph_name, processed_glyph_side, go=glyph_names)
@@ -150,6 +148,7 @@ def process_fonts(glyph_names, masters={}, depth=160, is_cff=None):
                 width = master[glyph_name].width
                 master[glyph_name].leftMargin = width/2+depth/2
                 master[glyph_name].width = width
+    collect()
 
 
 def make_designspace(fonts, family_name):
@@ -241,13 +240,25 @@ def rotorize(ufo=None, tt_font=None, depth=360, glyph_names_to_process=None, cma
         elif is_cff2:
             extractCff2(tt_font, glyph_name, output_glyph)
 
+    masters_90 = Font()
+    masters_90_flipped = Font()
+    masters_0_flipped = Font()
+    masters_90_flipped_left = Font()
+    masters_90_flipped_right = Font()
+    for glyph in ufo:
+        for master in (masters_90, masters_90_flipped, masters_0_flipped, masters_90_flipped_left, masters_90_flipped_right):
+            new_glyph = master.newGlyph(glyph.name)
+            new_glyph.width = glyph.width
+            pen = new_glyph.getPen()
+            glyph.draw(pen)
+
     masters = dict(
         master_0=ufo,
-        master_90=deepcopy(ufo),
-        master_90_flipped=deepcopy(ufo),
-        master_0_flipped=deepcopy(ufo),
-        master_90_flipped_left=deepcopy(ufo),
-        master_90_flipped_right=deepcopy(ufo)
+        master_90=masters_90,
+        master_90_flipped=masters_90_flipped,
+        master_0_flipped=masters_0_flipped,
+        master_90_flipped_left=masters_90_flipped_left,
+        master_90_flipped_right=masters_90_flipped_right
         )
     process_fonts(glyph_names_to_process, masters, depth=depth*(ufo.info.unitsPerEm/1000), is_cff=is_cff)
     designspace_underlay = make_designspace((
@@ -269,18 +280,15 @@ def rotorize(ufo=None, tt_font=None, depth=360, glyph_names_to_process=None, cma
         masters["master_0"],
         ), ufo.info.familyName)
     
-         
     output = (compileVariableTTF(designspace_underlay, optimizeGvar=False), compileVariableTTF(designspace_overlay, optimizeGvar=False))
+    collect()
     return output
     # return (varLib.build(designspace_underlay, optimize=False)[0], varLib.build(designspace_overlay, optimize=False)[0])
 
 if __name__ == "__main__":
 
-    # source = TTFont("test_fonts/sourceSerif.otf")
-    # source = TTFont("test_fonts/gabion.otf")
     from pathlib import Path
     base = Path(__file__).parent
-
     for font_file in (base.parent.parent.parent/"be_test/fonts").glob("*"):
         if font_file.suffix in [".otf", ".ttf"]:
             print(font_file.stem)
@@ -293,6 +301,7 @@ if __name__ == "__main__":
             fonts = rotorize(ufo=Font(), tt_font=source, cmap_reversed=cmap_reversed, glyph_names_to_process=glyph_names_to_process, depth=360)
             for i, font in enumerate(fonts):
                 font.save(f"output/{font_file.stem}-output-{i}.ttf")
+                del font
             end = datetime.now()
             print((end-start).total_seconds())
             break
