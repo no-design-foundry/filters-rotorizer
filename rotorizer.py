@@ -3,10 +3,12 @@ from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.designspaceLib import DesignSpaceDocument, AxisDescriptor, SourceDescriptor, InstanceDescriptor
 from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
 from fontTools.pens.cu2quPen import Cu2QuPen
-from defcon import Glyph, Point, Font
 from ufo2ft import compileVariableTTF
 from gc import collect
-
+from defcon import Glyph, Point, Font
+# from ufoLib2.objects.font import Font
+# from ufoLib2.objects.glyph import Font
+# from ufoLib2.objects.point import Point
 
 @property
 def position(self):
@@ -259,8 +261,11 @@ def rotorize(ufo=None, tt_font=None, depth=360, glyph_names_to_process=None, cma
         masters["master_0"],
         ), ufo.info.familyName)
     
-    output = (compileVariableTTF(designspace_underlay, optimizeGvar=False), compileVariableTTF(designspace_overlay, optimizeGvar=False))
-    collect()
+    output = []
+    for designspace in (designspace_underlay, designspace_overlay):
+        output.append(compileVariableTTF(designspace, optimizeGvar=False))
+        del designspace
+        collect()
     return output
     # return (varLib.build(designspace_underlay, optimize=False)[0], varLib.build(designspace_overlay, optimize=False)[0])
 
