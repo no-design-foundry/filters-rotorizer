@@ -3,12 +3,7 @@ from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.designspaceLib import DesignSpaceDocument, AxisDescriptor, SourceDescriptor, InstanceDescriptor
 from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
 from fontTools.pens.cu2quPen import Cu2QuPen
-
 from defcon import Glyph, Point, Font
-
-from datetime import datetime
-from pathlib import Path
-from pathlib import Path
 from ufo2ft import compileVariableTTF
 from gc import collect
 
@@ -68,22 +63,6 @@ def process_glyph(glyph, draw_sides, absolute=False, depth=160, is_cff=None):
     for contour in drawings:
         output_glyph.appendContour(contour)
     return output_glyph
-
-class TranslatingPen():
-    def __init__(self, other_pen):
-        self.other_pen = other_pen
-
-    def moveTo(self, point):
-        self.other_pen.moveTo(point)
-
-    def lineTo(self, point):
-        self.other_pen.lineTo(point)
-
-    def closePath(self):
-        self.other_pen.closePath()
-
-    def qCurveTo(self, *points):
-        self.other_pen.qCurveTo(*points)
 
 def draw(master, glyph_name, defcon_glyph, go=[]):
     if isinstance(master, TTFont):
@@ -288,6 +267,8 @@ def rotorize(ufo=None, tt_font=None, depth=360, glyph_names_to_process=None, cma
 if __name__ == "__main__":
 
     from pathlib import Path
+    from datetime import datetime
+
     base = Path(__file__).parent
     for font_file in (base.parent.parent.parent/"be_test/fonts").glob("*"):
         if font_file.suffix in [".otf", ".ttf"]:
