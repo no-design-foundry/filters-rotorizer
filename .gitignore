@@ -1,0 +1,7 @@
+.DS_Store
+*.ttf
+!template.ttf
+*.otf
+__pycache__
+.venv
+*.egg-info
