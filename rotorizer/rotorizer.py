@@ -160,18 +160,6 @@ def make_designspace(fonts, family_name):
         doc.addInstance(instance)
     return doc
 
-
-def createCmap(preview_string_glyph_names, cmap_reversed):
-    outtables = []
-    subtable = CmapSubtable.newSubtable(4)
-    subtable.platformID = 0
-    subtable.platEncID = 3
-    subtable.language = 0
-
-    subtable.cmap = {cmap_reversed[glyph_name]:glyph_name for glyph_name in preview_string_glyph_names if cmap_reversed.get(glyph_name)} # if
-    outtables.append(subtable)
-    return outtables
-
 def extractGlyf(source, glyph_name, output_glyph):
     source["glyf"][glyph_name].draw(output_glyph.getPen(), source["glyf"])
 
@@ -198,29 +186,8 @@ def extractCff2(source, glyph_name, output_glyph):
         cu2quPen.endPath()
     except:
         pass
-def rotorize(ufo=None, tt_font=None, depth=360, glyph_names_to_process=None, cmap_reversed=None, is_cff=None):
-    
-    is_ttf = False
-    is_cff = False
-    is_cff2 = False
-
-    if "glyf" in tt_font:
-        is_ttf = True
-    elif "CFF " in tt_font:
-        is_cff = True
-    elif "CFF2" in tt_font:
-        is_cff2 = True
-    for glyph_name in glyph_names_to_process:
-        output_glyph = ufo.newGlyph(glyph_name)
-        output_glyph.unicode=cmap_reversed.get(glyph_name, None)
-        output_glyph.width = tt_font["hmtx"][glyph_name][0]
-        if is_ttf:
-            extractGlyf(tt_font, glyph_name, output_glyph)
-        elif is_cff:
-            extractCff(tt_font, glyph_name, output_glyph)
-        elif is_cff2:
-            extractCff2(tt_font, glyph_name, output_glyph)
-
+def rotorize(ufo=None, depth=360, glyph_names_to_process=None, is_cff=None):
+    depth = 200
     masters_90 = Font()
     masters_90_flipped = Font()
     masters_0_flipped = Font()
@@ -261,6 +228,10 @@ def rotorize(ufo=None, tt_font=None, depth=360, glyph_names_to_process=None, cma
         masters["master_0"],
         ), ufo.info.familyName)
     
+    masters["master_0"].save("master_0.ufo")
+    masters["master_90"].save("master_90.ufo")
+    masters["master_90_flipped_right"].save("master_90_flipped_right.ufo")
+    
     output = []
     for designspace in (designspace_underlay, designspace_overlay):
         output.append(compileVariableTTF(designspace, optimizeGvar=False))
@@ -268,26 +239,3 @@ def rotorize(ufo=None, tt_font=None, depth=360, glyph_names_to_process=None, cma
         collect()
     return output
     # return (varLib.build(designspace_underlay, optimize=False)[0], varLib.build(designspace_overlay, optimize=False)[0])
-
-if __name__ == "__main__":
-
-    from pathlib import Path
-    from datetime import datetime
-
-    base = Path(__file__).parent
-    for font_file in (base.parent.parent.parent/"be_test/fonts").glob("*"):
-        if font_file.suffix in [".otf", ".ttf"]:
-            print(font_file.stem)
-            start = datetime.now()
-            source = TTFont(font_file)
-            cmap = source.getBestCmap()
-            cmap_reversed = {v:k for k,v in cmap.items()}
-            glyph_names_to_process = [cmap.get(ord(glyph_name)) for glyph_name in "ABC"]
-            glyph_names_to_process = [glyph_name for glyph_name in glyph_names_to_process if glyph_name]
-            fonts = rotorize(ufo=Font(), tt_font=source, cmap_reversed=cmap_reversed, glyph_names_to_process=glyph_names_to_process, depth=360)
-            for i, font in enumerate(fonts):
-                font.save(f"output/{font_file.stem}-output-{i}.ttf")
-                del font
-            end = datetime.now()
-            print((end-start).total_seconds())
-            break
