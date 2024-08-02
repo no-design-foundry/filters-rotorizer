@@ -187,7 +187,6 @@ def extractCff2(source, glyph_name, output_glyph):
     except:
         pass
 def rotorize(ufo=None, depth=360, glyph_names_to_process=None, is_cff=None):
-    depth = 200
     masters_90 = Font()
     masters_90_flipped = Font()
     masters_0_flipped = Font()
