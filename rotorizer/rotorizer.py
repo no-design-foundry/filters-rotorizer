@@ -6,6 +6,7 @@ from fontTools.pens.cu2quPen import Cu2QuPen
 from ufo2ft import compileVariableTTF
 from gc import collect
 from defcon import Glyph, Point, Font
+from copy import deepcopy
 # from ufoLib2.objects.font import Font
 # from ufoLib2.objects.glyph import Font
 # from ufoLib2.objects.point import Point
@@ -92,56 +93,67 @@ def align(master, glyph_name, defcon_glyph, go=[]):
             point.x = 0
     draw(master, glyph_name, defcon_glyph, go=go)
 
-def process_fonts(glyph_names, masters={}, depth=160, is_cff=None):
+def process_fonts(ufo, glyph_names, masters={}, depth=160, is_cff=None):
     for glyph_name in glyph_names:
-        glyph = Glyph()
-        pen = glyph.getPen()
-        if isinstance(masters["master_0"], TTFont):
-            masters["master_0"]["glyf"][glyph_name].draw(pen, masters["master_0"]["glyf"])
-            glyph.width = masters["master_0"]["hmtx"][glyph_name][0]
-        else:
-            masters["master_0"][glyph_name].draw(pen)
-
-        if len(glyph) > 0:
+        if len(ufo[glyph_name]) > 0:
             processed_glyph_glyph = Glyph()
-            glyph.draw(processed_glyph_glyph.getPen())
+            ufo[glyph_name].draw(processed_glyph_glyph.getPen())
 
             processed_glyph_side = Glyph()
-            glyph.draw(processed_glyph_side.getPen())
+            ufo[glyph_name].draw(processed_glyph_side.getPen())
 
             processed_glyph = process_glyph(processed_glyph_glyph, False, depth=depth, is_cff=is_cff)
             processed_glyph_side = process_glyph(processed_glyph_side, True, depth=depth, is_cff=is_cff)
-            draw(masters["master_0"], glyph_name, processed_glyph, go=glyph_names)
-            draw(masters["master_90"], glyph_name, processed_glyph_side, go=glyph_names)
-            flip(masters["master_90_flipped"], glyph_name, processed_glyph_side, go=glyph_names)
-            align(masters["master_90_flipped_left"], glyph_name, processed_glyph_side, go=glyph_names)
-            flip(masters["master_0_flipped"], glyph_name, processed_glyph, go=glyph_names)
-            align(masters["master_90_flipped_right"], glyph_name, processed_glyph_side, go=glyph_names)
+            
+            if "master_0" in masters:
+                draw(masters["master_0"], glyph_name, processed_glyph, go=glyph_names)
+            if "master_90" in masters:
+                draw(masters["master_90"], glyph_name, processed_glyph_side, go=glyph_names)
+            if "master_90_flipped" in masters:
+                flip(masters["master_90_flipped"], glyph_name, processed_glyph_side, go=glyph_names)
+            if "master_90_flipped_left" in masters:
+                align(masters["master_90_flipped_left"], glyph_name, processed_glyph_side, go=glyph_names)
+            if "master_0_flipped" in masters:
+                flip(masters["master_0_flipped"], glyph_name, processed_glyph, go=glyph_names)
+            if "master_90_flipped_right" in masters:
+                align(masters["master_90_flipped_right"], glyph_name, processed_glyph_side, go=glyph_names)
 
             for master_name in ("master_90", "master_90_flipped", "master_90_flipped_left"):
-                master = masters[master_name]
-                width = master[glyph_name].width
-                master[glyph_name].leftMargin = width/2-depth/2
-                master[glyph_name].width = width
+                if master_name in masters:
+                    master = masters[master_name]
+                    width = master[glyph_name].width
+                    master[glyph_name].leftMargin = width/2-depth/2
+                    master[glyph_name].width = width
         
             for master_name in ("master_90_flipped_right",):
-                master = masters[master_name]
-                width = master[glyph_name].width
-                master[glyph_name].leftMargin = width/2+depth/2
-                master[glyph_name].width = width
+                if master_name in masters:
+                    master = masters[master_name]
+                    width = master[glyph_name].width
+                    master[glyph_name].leftMargin = width/2+depth/2
+                    master[glyph_name].width = width
     collect()
 
 
-def make_designspace(fonts, family_name):
+def make_designspace(fonts, depth_fonts, family_name):
     axes = {"rotation": [0, 90, 90.0001, 180, 270, 270.0001, 360]}
     doc = DesignSpaceDocument()
+
     axis = AxisDescriptor()
     axis.minimum = 0
     axis.maximum = 360
     axis.default = 0
-    axis.name = "rotation"
+    axis.name = "Rotation"
     axis.tag = "RTTX"
     doc.addAxis(axis)
+
+    axis = AxisDescriptor()
+    axis.minimum = 0
+    axis.maximum = 100
+    axis.default = 0
+    axis.name = "Depth"
+    axis.tag = "DPTH"
+    doc.addAxis(axis)
+
     for i, font in enumerate(fonts):
         source = SourceDescriptor()
         source.font = font
@@ -151,11 +163,18 @@ def make_designspace(fonts, family_name):
             source.copyFeatures = True
             source.styleName = "Rotation 0"
             source.familyName = family_name
-        source.location = {"rotation": axes["rotation"][i]}
+        source.location = {"Rotation": axes["rotation"][i], "Depth": 0}
         doc.addSource(source)
+    
+    for i, font in enumerate(depth_fonts):
+        source = SourceDescriptor()
+        source.font = font
+        source.location = {"Rotation": axes["rotation"][i], "Depth": 100}
+        doc.addSource(source)
+
     for i, instance_position in enumerate([0, 45, 90, 135, 180, 225, 270, 315]):
         instance = InstanceDescriptor()
-        instance.designLocation = {"rotation":instance_position}
+        instance.designLocation = {"Rotation":instance_position}
         instance.styleName = f"Rotation {instance_position}"
         doc.addInstance(instance)
     return doc
@@ -186,50 +205,99 @@ def extractCff2(source, glyph_name, output_glyph):
         cu2quPen.endPath()
     except:
         pass
-def rotorize(ufo=None, depth=360, glyph_names_to_process=None, is_cff=None):
+def rotorize(ufo=None, glyph_names_to_process=None, is_cff=None):
+
+    masters_0 = Font()
+    for value in ["xHeight", "unitsPerEm", "ascender", "descender", "capHeight"]:
+        setattr(masters_0.info, value, getattr(ufo.info, value))
+
     masters_90 = Font()
     masters_90_flipped = Font()
     masters_0_flipped = Font()
     masters_90_flipped_left = Font()
     masters_90_flipped_right = Font()
-    for glyph in ufo:
-        for master in (masters_90, masters_90_flipped, masters_0_flipped, masters_90_flipped_left, masters_90_flipped_right):
+
+    masters_90_depth = Font()
+    masters_90_flipped_depth = Font()
+    masters_90_flipped_left_depth = Font()
+    masters_90_flipped_right_depth = Font()
+
+    for glyph_name_to_process in glyph_names_to_process:
+        glyph = ufo[glyph_name_to_process]
+        for master in (
+                masters_0,
+                masters_90,
+                masters_90_flipped,
+                masters_0_flipped,
+                masters_90_flipped_left,
+                masters_90_flipped_right,
+                masters_90_depth,
+                masters_90_flipped_depth,
+                masters_90_flipped_left_depth,
+                masters_90_flipped_right_depth,
+            ):
             new_glyph = master.newGlyph(glyph.name)
             new_glyph.width = glyph.width
+            new_glyph.unicodes = glyph.unicodes
             pen = new_glyph.getPen()
             glyph.draw(pen)
 
     masters = dict(
-        master_0=ufo,
+        master_0=masters_0,
         master_90=masters_90,
         master_90_flipped=masters_90_flipped,
         master_0_flipped=masters_0_flipped,
         master_90_flipped_left=masters_90_flipped_left,
         master_90_flipped_right=masters_90_flipped_right
         )
-    process_fonts(glyph_names_to_process, masters, depth=depth*(ufo.info.unitsPerEm/1000), is_cff=is_cff)
+    
+    depth_masters = dict(
+        master_90=masters_90_depth,
+        master_90_flipped=masters_90_flipped_depth,
+        master_90_flipped_left=masters_90_flipped_left_depth,
+        master_90_flipped_right=masters_90_flipped_right_depth
+    )
+
+    scale_factor = ufo.info.unitsPerEm/1000
+    process_fonts(ufo, glyph_names_to_process, masters, depth=0, is_cff=is_cff)
+    process_fonts(ufo, glyph_names_to_process, depth_masters, depth=500*scale_factor, is_cff=is_cff) # this needs to be first as it contains input ufo
+
+
     designspace_underlay = make_designspace((
-        masters["master_0"],
-        masters["master_90"],
-        masters["master_90_flipped"],
-        masters["master_0_flipped"],
-        masters["master_90_flipped"],
-        masters["master_90"],
-        masters["master_0"],
+            masters["master_0"],
+            masters["master_90"],
+            masters["master_90_flipped"],
+            masters["master_0_flipped"],
+            masters["master_90_flipped"],
+            masters["master_90"],
+            masters["master_0"],
+        ),(
+            masters["master_0"],
+            depth_masters["master_90"],
+            depth_masters["master_90_flipped"],
+            masters["master_0_flipped"],
+            depth_masters["master_90_flipped"],
+            depth_masters["master_90"],
+            masters["master_0"],
         ), ufo.info.familyName)
     designspace_overlay = make_designspace((
-        masters["master_0"],
-        masters["master_90_flipped_right"],
-        masters["master_90_flipped_left"],
-        masters["master_0_flipped"],
-        masters["master_90_flipped_right"],
-        masters["master_90_flipped_left"],
-        masters["master_0"],
+            masters["master_0"],
+            masters["master_90_flipped_right"],
+            masters["master_90_flipped_left"],
+            masters["master_0_flipped"],
+            masters["master_90_flipped_right"],
+            masters["master_90_flipped_left"],
+            masters["master_0"],
+        ), (
+            masters["master_0"],
+            depth_masters["master_90_flipped_right"],
+            depth_masters["master_90_flipped_left"],
+            masters["master_0_flipped"],
+            depth_masters["master_90_flipped_right"],
+            depth_masters["master_90_flipped_left"],
+            masters["master_0"],
         ), ufo.info.familyName)
     
-    masters["master_0"].save("master_0.ufo")
-    masters["master_90"].save("master_90.ufo")
-    masters["master_90_flipped_right"].save("master_90_flipped_right.ufo")
     
     output = []
     for designspace in (designspace_underlay, designspace_overlay):
@@ -237,4 +305,34 @@ def rotorize(ufo=None, depth=360, glyph_names_to_process=None, is_cff=None):
         del designspace
         collect()
     return output
-    # return (varLib.build(designspace_underlay, optimize=False)[0], varLib.build(designspace_overlay, optimize=False)[0])
+
+
+def main():
+    from extractor import extractUFO
+    from pathlib import Path
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Rotorize ufo")
+    parser.add_argument("input_file", type=Path, help="Path to the input font file.")
+    parser.add_argument("--output_dir", "-o", type=Path, help="Path to the output file. If not provided, the output will be saved in the same directory as the input file.")
+    parser.add_argument("--glyph_names", "-g", type=str, nargs="+", help="List of glyph names to process. If not provided, all glyphs will be processed.")
+
+    args = parser.parse_args()
+    
+    
+    input_file = args.input_file
+    ufo = Font(input_file)
+
+    glyph_names_to_process = args.glyph_names if args.glyph_names else ufo.glyphOrder
+    output_dir = args.output_dir
+    
+    rotorized_layers = rotorize(ufo, glyph_names_to_process=glyph_names_to_process, is_cff=True)
+
+    for layer_name, layer in zip(("underlay", "overlay"), rotorized_layers):
+        output_file_name = f"{input_file.stem}_rotorized_{layer_name}.ttf"
+        layer.save(output_dir/output_file_name if output_dir else input_file.parent/output_file_name)
+
+
+if __name__ == "__main__":
+    main()
+
