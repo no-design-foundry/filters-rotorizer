@@ -6,7 +6,7 @@ setup(
     packages=find_packages(),
     description='no design foundry – rotorizer plugin',
     author='Jan Sindler',
-    author_email='jansindl3r@example.com',
+    author_email='jansindl3r@gmail.com',
     classifiers=[
         'Development Status :: 3 - Alpha',
         'Intended Audience :: Developers',

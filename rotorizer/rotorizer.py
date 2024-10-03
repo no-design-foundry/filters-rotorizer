@@ -210,6 +210,7 @@ def rotorize(ufo=None, glyph_names_to_process=None, is_cff=None):
     masters_0 = Font()
     for value in ["xHeight", "unitsPerEm", "ascender", "descender", "capHeight"]:
         setattr(masters_0.info, value, getattr(ufo.info, value))
+    masters_0.kerning.update(ufo.kerning)
 
     masters_90 = Font()
     masters_90_flipped = Font()
