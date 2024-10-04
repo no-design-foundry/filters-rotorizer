@@ -1,15 +1,12 @@
-from fontTools.ttLib import TTFont
-from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.designspaceLib import DesignSpaceDocument, AxisDescriptor, SourceDescriptor, InstanceDescriptor
-from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
 from fontTools.pens.cu2quPen import Cu2QuPen
 from ufo2ft import compileVariableTTF
 from gc import collect
-from defcon import Glyph, Point, Font
-from copy import deepcopy
-# from ufoLib2.objects.font import Font
-# from ufoLib2.objects.glyph import Font
-# from ufoLib2.objects.point import Point
+from fontTools.pens.statisticsPen import StatisticsPen
+
+from ufoLib2.objects.font import Font
+from ufoLib2.objects.glyph import Glyph
+from ufoLib2.objects.point import Point
 
 @property
 def position(self):
@@ -17,11 +14,35 @@ def position(self):
 
 setattr(Point, "position", position)
 
+def get_segments(contour):
+    # taken from defcon
+    if not len(contour):
+        return []
+    segments = [[]]
+    lastWasOffCurve = False
+    for point in contour:
+        segments[-1].append(point)
+        if point.segmentType is not None:
+            segments.append([])
+        lastWasOffCurve = point.segmentType is None
+    if len(segments[-1]) == 0:
+        del segments[-1]
+    if lastWasOffCurve:
+        if len(segments) != 1:
+            lastSegment = segments[-1]
+            segment = segments.pop(0)
+            lastSegment.extend(segment)
+    elif segments[0][-1].segmentType != "move":
+        segment = segments.pop(0)
+        segments.append(segment)
+    return segments
+
 def process_glyph(glyph, draw_sides, absolute=False, depth=160, is_cff=None):
     drawings = []
     for contour in glyph:
-        lowest_point = min(zip(contour.segments, range(len(contour.segments))),key=lambda x: x[0][-1].position[::-1],)[1]
-        contour_reordered = (contour.segments[lowest_point:] + contour.segments[:lowest_point])
+        segments = get_segments(contour)
+        lowest_point = min(zip(segments, range(len(segments))),key=lambda x: x[0][-1].position[::-1],)[1]
+        contour_reordered = (segments[lowest_point:] + segments[:lowest_point])
         values = [a[-1].y > b[-1].y for a, b in zip(contour_reordered, contour_reordered[1:] + contour_reordered[:1])
         ]
         if values[0] == values[-1]:
@@ -37,7 +58,10 @@ def process_glyph(glyph, draw_sides, absolute=False, depth=160, is_cff=None):
         edges = [glyph.width / 2 + depth / 2, glyph.width / 2 - depth / 2]
         if absolute:
             edges = edges[:1] * 2
-        if contour.clockwise:
+        statistics_pen = StatisticsPen()
+        contour.draw(statistics_pen)
+        is_clockwise = statistics_pen.area < 0 
+        if is_clockwise:
             edges = edges[::-1]
         for index in range(1, len(values) + 1):
             value = values[index % len(values)]
@@ -50,48 +74,38 @@ def process_glyph(glyph, draw_sides, absolute=False, depth=160, is_cff=None):
                 x, y = point.position
                 if draw_sides:
                     x = edges[0 if is_cff else 1]
-                drawing.appendPoint(Point((x, y), point.segmentType))
+                drawing.points.append(Point(x, y, point.segmentType))
             if duplicate is True:
                 x, y = segment[-1].position
                 if draw_sides:
                     edges = edges[::-1]
                     x = edges[0 if is_cff else 1]
-                drawing.appendPoint(Point((x, y), "line"))
-        if contour.clockwise and draw_sides:
-            for segment in drawing.segments:
-                for point in segment:
-                    point.x = edges[(edges.index(point.x) + 1) % 2]
+                drawing.points.append(Point(x, y, "line"))
+        if is_clockwise and draw_sides:
+            for point in drawing:
+                point.x = edges[(edges.index(point.x) + 1) % 2]
         drawings.append(drawing)
     output_glyph = Glyph()
     for contour in drawings:
-        output_glyph.appendContour(contour)
+        output_glyph.contours.append(contour)
     return output_glyph
 
-def draw(master, glyph_name, defcon_glyph, go=[]):
-    if isinstance(master, TTFont):
-        pen = TTGlyphPen(go)
-        defcon_glyph.draw(pen)
-        master["glyf"][glyph_name] = pen.glyph()
-        master["hmtx"][glyph_name] = (master["hmtx"][glyph_name][0], defcon_glyph.bounds[0])
-    else:
-        master[glyph_name].clear()
-        defcon_glyph.draw(master[glyph_name].getPen())
+def draw(master, glyph_name, glyph):
+    master[glyph_name].clear()
+    glyph.draw(master[glyph_name].getPen())
 
-def flip(master, glyph_name, defcon_glyph, go=[]):
-    if isinstance(master, TTFont):
-        width_half = master["hmtx"][glyph_name][0] / 2
-    else:
-        width_half = master[glyph_name].width / 2
-    for contour in defcon_glyph:
+def flip(master, glyph_name, glyph):
+    width_half = master[glyph_name].width / 2
+    for contour in glyph:
         for point in contour:
             point.x = width_half + (width_half - point.x)
-    draw(master, glyph_name, defcon_glyph, go=go)
+    draw(master, glyph_name, glyph)
 
-def align(master, glyph_name, defcon_glyph, go=[]):
-    for contour in defcon_glyph:
+def align(master, glyph_name, glyph):
+    for contour in glyph:
         for point in contour:
             point.x = 0
-    draw(master, glyph_name, defcon_glyph, go=go)
+    draw(master, glyph_name, glyph)
 
 def process_fonts(ufo, glyph_names, masters={}, depth=160, is_cff=None):
     for glyph_name in glyph_names:
@@ -106,30 +120,30 @@ def process_fonts(ufo, glyph_names, masters={}, depth=160, is_cff=None):
             processed_glyph_side = process_glyph(processed_glyph_side, True, depth=depth, is_cff=is_cff)
             
             if "master_0" in masters:
-                draw(masters["master_0"], glyph_name, processed_glyph, go=glyph_names)
+                draw(masters["master_0"], glyph_name, processed_glyph)
             if "master_90" in masters:
-                draw(masters["master_90"], glyph_name, processed_glyph_side, go=glyph_names)
+                draw(masters["master_90"], glyph_name, processed_glyph_side)
             if "master_90_flipped" in masters:
-                flip(masters["master_90_flipped"], glyph_name, processed_glyph_side, go=glyph_names)
+                flip(masters["master_90_flipped"], glyph_name, processed_glyph_side)
             if "master_90_flipped_left" in masters:
-                align(masters["master_90_flipped_left"], glyph_name, processed_glyph_side, go=glyph_names)
+                align(masters["master_90_flipped_left"], glyph_name, processed_glyph_side)
             if "master_0_flipped" in masters:
-                flip(masters["master_0_flipped"], glyph_name, processed_glyph, go=glyph_names)
+                flip(masters["master_0_flipped"], glyph_name, processed_glyph)
             if "master_90_flipped_right" in masters:
-                align(masters["master_90_flipped_right"], glyph_name, processed_glyph_side, go=glyph_names)
+                align(masters["master_90_flipped_right"], glyph_name, processed_glyph_side)
 
             for master_name in ("master_90", "master_90_flipped", "master_90_flipped_left"):
                 if master_name in masters:
                     master = masters[master_name]
                     width = master[glyph_name].width
-                    master[glyph_name].leftMargin = width/2-depth/2
+                    master[glyph_name].setLeftMargin(width/2-depth/2)
                     master[glyph_name].width = width
         
             for master_name in ("master_90_flipped_right",):
                 if master_name in masters:
                     master = masters[master_name]
                     width = master[glyph_name].width
-                    master[glyph_name].leftMargin = width/2+depth/2
+                    master[glyph_name].setLeftMargin(width/2+depth/2)
                     master[glyph_name].width = width
     collect()
 
